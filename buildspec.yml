@@ -1,20 +1,29 @@
 version: 0.2
 
+env:
+  variables:
+    SNS_TOPIC_ARN: "arn:aws:sns:us-east-2:880502554903:CodeBuildNotifications.fifo"  # Your FIFO SNS ARN
+    MESSAGE_GROUP_ID: "CodeBuildNotificationsGroup"  # Required for FIFO topics
+
 phases:
   pre_build:
     commands:
       - echo "Checking SNS_TOPIC_ARN: ${SNS_TOPIC_ARN}"
       - if [ -z "${SNS_TOPIC_ARN}" ]; then echo "Error: SNS_TOPIC_ARN is not set!" && exit 1; fi
       - echo "Creating notification message file..."
-      - echo "CODEBUILD_INITIATOR:${CODEBUILD_INITIATOR}" > sns-message.txt
-      - echo "CODEBUILD_BUILD_ID:${CODEBUILD_BUILD_ID}" >> sns-message.txt
-      - echo "CODEBUILD_SOURCE_REPO_URL:${CODEBUILD_SOURCE_REPO_URL}" >> sns-message.txt
-      - echo "CODEBUILD_SOURCE_VERSION:${CODEBUILD_SOURCE_VERSION}" >> sns-message.txt
-      - echo "CODEBUILD_RESOLVED_SOURCE_VERSION:${CODEBUILD_RESOLVED_SOURCE_VERSION}" >> sns-message.txt
-      - echo "DOCKER_COMPOSE_VERSION:${DOCKER_COMPOSE_VERSION}" >> sns-message.txt
+      - |
+        echo "CODEBUILD_INITIATOR:${CODEBUILD_INITIATOR}" > sns-message.txt
+        echo "CODEBUILD_BUILD_ID:${CODEBUILD_BUILD_ID}" >> sns-message.txt
+        echo "CODEBUILD_SOURCE_REPO_URL:${CODEBUILD_SOURCE_REPO_URL}" >> sns-message.txt
+        echo "CODEBUILD_SOURCE_VERSION:${CODEBUILD_SOURCE_VERSION}" >> sns-message.txt
+        echo "CODEBUILD_RESOLVED_SOURCE_VERSION:${CODEBUILD_RESOLVED_SOURCE_VERSION}" >> sns-message.txt
+        echo "DOCKER_COMPOSE_VERSION:${DOCKER_COMPOSE_VERSION}" >> sns-message.txt
       - cat sns-message.txt
       - echo "Sending notification..."
-      - aws sns publish --topic-arn "${SNS_TOPIC_ARN}" --subject "AWS CodeBuild Started - ${CODEBUILD_BUILD_ID}" --message file://sns-message.txt
+      - aws sns publish --topic-arn "${SNS_TOPIC_ARN}" \
+        --subject "AWS CodeBuild Started - ${CODEBUILD_BUILD_ID}" \
+        --message file://sns-message.txt \
+        --message-group-id "${MESSAGE_GROUP_ID}"   # Required for FIFO Topics
       - echo "Logging in to Amazon ECR..."
       - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
       - echo "Pulling Docker Images for cache..."
@@ -30,9 +39,15 @@ phases:
       - echo "Pushing the Docker image..."
       - docker-compose push
       - echo "Printing environment variables..."
-      - printenv
+      - printenv | tee -a log.txt
       - echo "Sending build log..."
-      - aws sns publish --topic-arn "${SNS_TOPIC_ARN}" --subject "AWS CodeBuild Log - ${CODEBUILD_BUILD_ID}" --message file://log.txt
+      - aws sns publish --topic-arn "${SNS_TOPIC_ARN}" \
+        --subject "AWS CodeBuild Log - ${CODEBUILD_BUILD_ID}" \
+        --message file://log.txt \
+        --message-group-id "${MESSAGE_GROUP_ID}"
       - echo "CODEBUILD_BUILD_SUCCEEDING:${CODEBUILD_BUILD_SUCCEEDING}" >> sns-message.txt
       - echo "Sending completion notification..."
-      - aws sns publish --topic-arn "${SNS_TOPIC_ARN}" --subject "AWS CodeBuild Completed - ${CODEBUILD_BUILD_ID}" --message file://sns-message.txt
+      - aws sns publish --topic-arn "${SNS_TOPIC_ARN}" \
+        --subject "AWS CodeBuild Completed - ${CODEBUILD_BUILD_ID}" \
+        --message file://sns-message.txt \
+        --message-group-id "${MESSAGE_GROUP_ID}"
